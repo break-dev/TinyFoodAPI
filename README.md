@@ -10,7 +10,7 @@
 
 ```
 Cliente móvil conecta via WebSocket
-  → Emite evento con imagen en base64
+  → Emite evento con imagen en binario
     → API consulta Gemini (Google GenAI) para identificar alimentos
       → Gemini devuelve JSON estructurado { name, category, quantity }[]
         → API persiste el registro en Supabase (PostgreSQL)
@@ -87,35 +87,32 @@ src/modules/<modulo>/
 #### Capa Presentation — Gateways
 
 - **Responsabilidad:** Puerta de entrada WS. Recibe eventos, aplica Guards y Filters, y retorna la respuesta al cliente.
-- **Regla:** Solo se comunica con la capa Logic (o Service cuando aún no hay lógica compleja). No contiene reglas de negocio.
+- **Regla:** Solo se comunica con la capa Logic. No contiene reglas de negocio.
 - Decoradores clave: `@WebSocketGateway`, `@SubscribeMessage`, `@UseGuards`, `@UseFilters`.
 - Toda respuesta debe usar `ApiResponse.success(data, msg)` o `ApiResponse.error(msg)`.
 
-**Ejemplo actual:** `src/modules/main/pantry.gateway.ts`
+**Ejemplo:** `src/modules/home/presentation/home.gateway.ts`
 
 ```typescript
 @WebSocketGateway({ cors: { origin: '*' } })
 @UseFilters(WsExceptionFilter)
-export class PantryGateway
+export class HomeGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
   @UseGuards(WsAuthGuard)
-  @SubscribeMessage('pantry:analyze_image')
+  @SubscribeMessage('home:analyze_image')
   async handleAnalyzeImage(
     client: Socket,
-    payload: { imageBase64: string; token: string },
+    payload: { image: Buffer; token: string },
   ): Promise<ApiResponse> {
-    const result = await this.pantryService.analyzeFoodImage(
-      payload.imageBase64,
-    );
-    return ApiResponse.success(result, 'Imagen analizada con éxito');
+    return await this.homeService.analyzeFoodImage(payload.image);
   }
 }
 ```
 
 #### Capa Logic — Use Cases
 
-- **Responsabilidad:** Regla de negocio pura. Orquesta llamadas a Service y Data.
+- **Responsabilidad:** Regla de negocio. Orquesta llamadas a Service y Data.
 - Implementados como clases `@Injectable()` invocadas desde el Gateway.
 
 #### Capa Service — External Services
@@ -123,14 +120,14 @@ export class PantryGateway
 - **Responsabilidad:** Comunicación con terceros: Google Gemini, proveedores OAuth, sistemas externos.
 - La integración con Gemini reside aquí.
 
-**Ejemplo actual:** `src/modules/main/pantry.service.ts`
+**Ejemplo actual:** `src/modules/home/service/analyze-food-image.service.ts`
 
 ```typescript
 // Llama a Gemini con gemini-2.0-flash y fuerza respuesta JSON estructurada
-async analyzeFoodImage(imageBase64: string): Promise<any> {
+async analyzeFoodImage(image: Buffer): Promise<any> {
   const response = await this.ai.models.generateContent({
     model: 'gemini-2.0-flash',
-    contents: [ prompt, { inlineData: { mimeType: 'image/jpeg', data: base64Data } } ],
+    contents: [ prompt, { inlineData: { mimeType: 'image/jpeg', data: image } } ],
     config: {
       responseMimeType: 'application/json',
       responseSchema: {
@@ -152,14 +149,16 @@ async analyzeFoodImage(imageBase64: string): Promise<any> {
 
 #### Capa Data — Repositorios
 
-- **Responsabilidad:** Consultas a Supabase (PostgreSQL).
+- **Responsabilidad:** Consultas a Supabase (PostgreSQL) mediante los modelos de Prisma ORM de la capa de model o scripts SQL.
 - Usa el SDK `@supabase/supabase-js` directamente.
+- No debe usar consultas con el ORM cuando la consulta tenga: agrupaciones, subconsultas, funciones o joins. Ante esto usar scripts SQL correctamente formateados para mejor legibilidad.
 - Aislada completamente del resto: ninguna otra capa hace consultas SQL.
+- Cada metodo debe hacer una sóla operación atómica, por lo que si un caso de uso necesita más de una operación al usar esta capa, se debe hacer una transacción.
 
 #### Capa Model (transversal)
 
-- Espejo estricto de las tablas de la base de datos como interfaces TypeScript.
-- Ubicación: externa a los módulos específicos (ej. `src/common/interfaces/` o una carpeta `models/`).
+- Espejo estricto de las tablas de la base de datos mediante modelos de prisma.
+- Ubicación: externa a los módulos específicos (ej. `src/models/`)
 
 ---
 
@@ -184,21 +183,21 @@ Recibir: auth:sync       ApiResponse<{ id, email, sync: boolean }>
 
 **Flujo:** El `WsAuthGuard` valida el token JWT con Supabase → inyecta `client.user` → `AuthGateway` pasa el usuario a `AuthService.syncProfile` → hace upsert del perfil en la tabla `usuario`.
 
-### `src/modules/main` (pantry)
+### `src/modules/main` (home)
 
 Gestiona el inventario de alimentos (despensa).
 
-| Archivo             | Propósito                                                  |
-| ------------------- | ---------------------------------------------------------- |
-| `pantry.gateway.ts` | Gateway WS. Evento `pantry:analyze_image` → llama a Gemini |
-| `pantry.service.ts` | Integración con Google Gemini (`gemini-2.0-flash`)         |
-| `pantry.module.ts`  | Módulo NestJS                                              |
+| Archivo           | Propósito                                                |
+| ----------------- | -------------------------------------------------------- |
+| `home.gateway.ts` | Gateway WS. Evento `home:analyze_image` → llama a Gemini |
+| `home.service.ts` | Integración con Google Gemini (`gemini-2.0-flash`)       |
+| `home.module.ts`  | Módulo NestJS                                            |
 
 **Evento WebSocket:**
 
 ```
-Emitir:  pantry:analyze_image   { imageBase64: string, token: string }
-Recibir: pantry:analyze_image   ApiResponse<Array<{ name: string, category: string, quantity: string }>>
+Emitir:  home:analyze_image   { imageBase64: string, token: string }
+Recibir: home:analyze_image   ApiResponse<Array<{ name: string, category: string, quantity: string }>>
 ```
 
 **Notas importantes:**
@@ -227,7 +226,7 @@ class ApiResponse<T = unknown> {
 }
 ```
 
-> **Regla:** Todo Gateway siempre retorna `ApiResponse`. Nunca retornar objetos planos.
+> **Regla:** Toda caso de uso siempre retorna `ApiResponse`. Nunca retornar objetos planos.
 
 ### `WsAuthGuard` — `src/common/guards/ws-auth.guard.ts`
 
@@ -245,7 +244,7 @@ const socket = io('http://localhost:3000', {
 });
 
 // O en cada evento:
-socket.emit('pantry:analyze_image', {
+socket.emit('home:analyze_image', {
   imageBase64: '...',
   token: supabaseSession.access_token,
 });
@@ -268,12 +267,12 @@ socket.on('exception', (response: ApiResponse) => {
 ### Interfaces WS — `src/common/interfaces/ws.interface.ts`
 
 ```typescript
-interface WsResponse<T = any> {
+interface ApiResponse<T = any> {
   success: boolean;
   data: T;
   message: string;
 }
-interface WsRequest<T = any> {
+interface ClientRequest<T = any> {
   token?: string;
   event: string;
   body: T;
@@ -292,9 +291,10 @@ nombre              TEXT
 correo              TEXT UNIQUE
 peso                NUMERIC          -- kg, para cálculo de IMC
 talla               NUMERIC          -- cm, para cálculo de IMC
+imc                 NUMERIC          -- para cálculo de gasto calórico
 fecha_nacimiento    DATE
 nivel_actividad     INTEGER          -- Rango 1-5
-informacion_medica  JSONB            -- Array [{ nombre: string, descripcion: string }]
+informacion_medica  JSONB            -- Array []string
 alimentos_prohibidos TEXT[]          -- Array de tags (ej. ["gluten", "lactosa"])
 preferencias        TEXT[]           -- Array de tags (ej. ["vegano", "sin_picante"])
 created_at          TIMESTAMPTZ DEFAULT now()
@@ -326,15 +326,15 @@ Gateway base aplicable a nivel de toda la app. Usado para eventos globales (cone
 
 ## 9. Convenciones de Código
 
-| Concepto             | Convención                                                              |
-| -------------------- | ----------------------------------------------------------------------- |
-| Módulos              | `src/modules/<nombre>/` en kebab-case                                   |
-| Gateways             | `<modulo>.gateway.ts`, clase `<Modulo>Gateway`                          |
-| Services             | `<modulo>.service.ts`, clase `<Modulo>Service` con `@Injectable()`      |
-| Módulos NestJS       | `<modulo>.module.ts`, registra gateway + service + data                 |
-| Eventos WS           | `modulo:accion` en snake_case (ej. `pantry:analyze_image`, `auth:sync`) |
-| Respuestas           | Siempre `ApiResponse.success(data, msg)` o `ApiResponse.error(msg)`     |
-| Variables de entorno | Acceder **solo** via `ConfigService`, nunca `process.env` directamente  |
+| Concepto             | Convención                                                                             |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| Módulos              | `src/modules/<nombre>/` en kebab-case                                                  |
+| Gateways             | `<modulo o caso de uso>.gateway.ts`, clase `<Modulo>Gateway`                           |
+| Services             | `<servicio externo>.service.ts`, clase `<Modulo>Service` con `@Injectable()`           |
+| Módulos NestJS       | `<modulo o caso de uso>.module.ts`, registra gateway + service + data                  |
+| Eventos WS           | `modulo:accion` en snake_case (ej. `home:analyze_image`, `auth:sync`)                  |
+| Respuestas           | Siempre `ApiResponse.success(data, msg)` o `ApiResponse.error(msg)`                    |
+| Variables de entorno | Acceder **solo** via `ConfigService`, nunca `process.env` directamente                 |
 
 ---
 
