@@ -4,358 +4,108 @@
 
 ## 1. Contexto del Negocio
 
-**Objetivo:** Backend de alto rendimiento para la app móvil TinyFood. Reduce el desperdicio de alimentos en el hogar mediante análisis de imágenes por IA y gestión de salud del usuario.
+**Objetivo:** Backend de alto rendimiento para la app móvil TinyFood. Gestiona el ciclo de vida de los alimentos y la salud del usuario mediante IA.
 
 **Flujo principal:**
-
-```
-Cliente móvil conecta via WebSocket
-  → Emite evento con imagen en binario
-    → API consulta Gemini (Google GenAI) para identificar alimentos
-      → Gemini devuelve JSON estructurado { name, category, quantity }[]
-        → API persiste el registro en Supabase (PostgreSQL)
-          → API emite respuesta al cliente via WS
-```
-
-**Puerto por defecto:** `3000`  
-**URL local:** `http://localhost:3000`
+1. El cliente móvil conecta vía WebSocket.
+2. Se autentica mediante el JWT de Supabase (validado en el `AuthGuard`).
+3. Envía eventos (`auth:autenticar`, `home:analyze_image`, etc.).
+4. La API procesa, persiste en PostgreSQL (Supabase) y responde mediante un callback (Acknowledgement).
 
 ---
 
 ## 2. Stack Tecnológico
 
-| Herramienta                | Versión       | Uso                                                |
-| -------------------------- | ------------- | -------------------------------------------------- |
-| NestJS                     | ^11.0.1       | Framework principal                                |
-| TypeScript                 | ^5.7.3        | **Obligatorio** en todo el proyecto                |
-| Socket.IO                  | ^4.8.3        | Transport de WebSockets                            |
-| @nestjs/websockets         | ^11.1.18      | Decoradores e integración WS con NestJS            |
-| @nestjs/platform-socket.io | ^11.1.18      | Adaptador de Socket.IO                             |
-| @supabase/supabase-js      | ^2.103.0      | Cliente de base de datos (PostgreSQL via Supabase) |
-| @google/genai              | ^1.49.0       | SDK de Google Gemini                               |
-| @nestjs/config             | ^4.0.4        | Gestión de variables de entorno                    |
-| body-parser                | (via express) | Payloads hasta 20MB (para imágenes base64)         |
-
-**Scripts disponibles:**
-
-```bash
-npm run start:dev   # Modo desarrollo con hot-reload (watch)
-npm run start       # Producción sin watch
-npm run build       # Compila TypeScript a dist/
-npm run start:prod  # Ejecuta desde dist/ (post-build)
-npm run format      # Prettier sobre src/**/*.ts
-npm run lint        # ESLint con auto-fix
-```
+| Herramienta        | Versión  | Uso                                                |
+| ------------------ | -------- | -------------------------------------------------- |
+| NestJS             | ^11.0.1  | Framework principal                                |
+| TypeScript         | ^5.7.3   | Tipado estricto obligatorio                        |
+| Socket.IO          | ^4.8.3   | Motor de comunicación bidireccional                |
+| Prisma ORM         | ^6.4.1   | Gestión de Base de Datos (PostgreSQL)              |
+| @supabase/supabase | ^2.62.2  | Validación de sesiones y acceso a storage          |
+| @google/genai      | ^1.49.0  | Integración con IA Gemini 2.0                      |
 
 ---
 
-## 3. Variables de Entorno
+## 3. Arquitectura de Comunicación (WebSockets Core)
 
-Copia `.env.example` a `.env` y completa los valores:
+Hemos implementado un sistema de **Puente Centralizado** para máxima seguridad y orden:
 
-```env
-# Supabase
-SUPABASE_URL="https://tu-proyecto.supabase.co"
-SUPABASE_KEY="tu-anon-key"                        # Usada en WsAuthGuard para validar tokens
-SUPABASE_SERVICE_ROLE_KEY="tu-service-role-key"   # Usada en AuthService para upserts bypassando RLS
+### 3.1 `PrivateGateway` (`src/common/presentation/gateways`)
+Es el único punto de entrada para eventos privados. 
+- Usa un listener `onAny` para capturar todos los eventos.
+- Valida manualmente el token JWT mediante `AuthGuard.verify`.
+- Inyecta el `usuario` de la base de datos directamente en el objeto `client`.
+- Soporta **Acknowledgements** (callbacks): si el cliente envía una función de respuesta, la API la ejecuta.
 
-# Google Gemini
-GEMINI_API_KEY="tu-api-key-de-gemini"
-
-# Puerto (opcional, default: 3000)
-PORT=3000
-```
-
-> `ConfigModule.forRoot({ isGlobal: true })` hace que estas variables estén disponibles en cualquier módulo vía `ConfigService`.
+### 3.2 `Dispatcher` (`src/common/presentation/dispatcher.ts`)
+Actúa como el "router" de los eventos WebSocket.
+- Registra handlers de forma estática.
+- Busca el handler correspondiente al nombre del evento (ej: `auth:autenticar`) y lo ejecuta.
 
 ---
 
-## 4. Arquitectura de la API (Obligatoria)
-
-La API está organizada en **módulos** dentro de `src/modules/`. La comunicación cliente-servidor es **100% WebSockets** salvo integraciones de terceros que requieran webhooks HTTP.
-
-### Capas dentro de cada módulo
+## 4. Estructura de Módulos (Clean Architecture)
 
 ```
 src/modules/<modulo>/
-  presentation/      ← Gateways WS (punto de entrada)
-  logic/             ← Casos de uso / reglas de negocio
-  service/           ← Integraciones externas (Gemini, OAuth, etc.)
-  data/              ← Repositorios (consultas a Supabase)
+  presentation/ ← Registro de eventos en el Dispatcher (ej. auth.gateway.ts)
+  logic/        ← Casos de Uso (ej. autenticar.uc.ts)
+  data/         ← Repositorios con Prisma (ej. auth.data.ts)
 ```
 
-#### Capa Presentation — Gateways
+---
 
-- **Responsabilidad:** Puerta de entrada WS. Recibe eventos, aplica Guards y Filters, y retorna la respuesta al cliente.
-- **Regla:** Solo se comunica con la capa Logic. No contiene reglas de negocio.
-- Decoradores clave: `@WebSocketGateway`, `@SubscribeMessage`, `@UseGuards`, `@UseFilters`.
-- Toda respuesta debe usar `ApiResponse.success(data, msg)` o `ApiResponse.error(msg)`.
+## 5. Base de Datos (Prisma & Supabase)
 
-**Ejemplo:** `src/modules/home/presentation/home.gateway.ts`
+### 5.1 Esquema Multi-archivo
+Usamos `prisma/schema/*.prisma` para mantener el orden. Los modelos principales son:
+- **Usuario:** Almacena peso, talla, y arreglos nativos de Postgres (`String[]`) para `alimentos_prohibidos` y `preferencias`.
+- **Comida:** Almacena el inventario con fechas de vencimiento estimadas.
 
+### 5.2 Tipos de Datos Especiales
+- **Arrays:** Usamos `String[]` para tags y preferencias (mapeados a `text[]` en Postgres).
+- **JSONB:** Usamos `Json?` para `informacion_medica`, permitiendo estructuras flexibles.
+
+---
+
+## 6. Seguridad (AuthGuard)
+
+El `AuthGuard.ts` utiliza el SDK oficial de Supabase para verificar los tokens:
+1. Recibe el token del payload o del handshake.
+2. Llama a `supabase.auth.getUser(token)`.
+3. Si el usuario existe en Supabase pero no en nuestra BD local, permite el evento `auth:registrar` pero bloquea los demás.
+
+---
+
+## 7. Convenciones de Respuesta (`ApiResponse`)
+
+Todas las respuestas deben seguir esta estructura:
 ```typescript
-@WebSocketGateway({ cors: { origin: '*' } })
-@UseFilters(WsExceptionFilter)
-export class HomeGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
-  @UseGuards(WsAuthGuard)
-  @SubscribeMessage('home:analyze_image')
-  async handleAnalyzeImage(
-    client: Socket,
-    payload: { image: Buffer; token: string },
-  ): Promise<ApiResponse> {
-    return await this.homeService.analyzeFoodImage(payload.image);
-  }
-}
-```
-
-#### Capa Logic — Use Cases
-
-- **Responsabilidad:** Regla de negocio. Orquesta llamadas a Service y Data.
-- Implementados como clases `@Injectable()` invocadas desde el Gateway.
-
-#### Capa Service — External Services
-
-- **Responsabilidad:** Comunicación con terceros: Google Gemini, proveedores OAuth, sistemas externos.
-- La integración con Gemini reside aquí.
-
-**Ejemplo actual:** `src/modules/home/service/analyze-food-image.service.ts`
-
-```typescript
-// Llama a Gemini con gemini-2.0-flash y fuerza respuesta JSON estructurada
-async analyzeFoodImage(image: Buffer): Promise<any> {
-  const response = await this.ai.models.generateContent({
-    model: 'gemini-2.0-flash',
-    contents: [ prompt, { inlineData: { mimeType: 'image/jpeg', data: image } } ],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            category: { type: Type.STRING },
-            quantity: { type: Type.STRING },
-          },
-        },
-      },
-    },
-  });
-  return JSON.parse(response.text || '[]');
-}
-```
-
-#### Capa Data — Repositorios
-
-- **Responsabilidad:** Consultas a Supabase (PostgreSQL) mediante los modelos de Prisma ORM de la capa de model o scripts SQL.
-- Usa el SDK `@supabase/supabase-js` directamente.
-- No debe usar consultas con el ORM cuando la consulta tenga: agrupaciones, subconsultas, funciones o joins. Ante esto usar scripts SQL correctamente formateados para mejor legibilidad.
-- Aislada completamente del resto: ninguna otra capa hace consultas SQL.
-- Cada metodo debe hacer una sóla operación atómica, por lo que si un caso de uso necesita más de una operación al usar esta capa, se debe hacer una transacción.
-
-#### Capa Model (transversal)
-
-- Espejo estricto de las tablas de la base de datos mediante modelos de prisma.
-- Ubicación: externa a los módulos específicos (ej. `src/models/`)
-
----
-
-## 5. Módulos Actuales
-
-### `src/modules/auth`
-
-Gestiona la autenticación del usuario con Supabase.
-
-| Archivo           | Propósito                                          |
-| ----------------- | -------------------------------------------------- |
-| `auth.gateway.ts` | Gateway WS. Evento `auth:sync` → sincroniza perfil |
-| `auth.service.ts` | Lógica de sincronización de perfil en Supabase     |
-| `auth.module.ts`  | Módulo NestJS que registra gateway y service       |
-
-**Evento WebSocket:**
-
-```
-Emitir:  auth:sync       { token: string }   (token en handshake o payload)
-Recibir: auth:sync       ApiResponse<{ id, email, sync: boolean }>
-```
-
-**Flujo:** El `WsAuthGuard` valida el token JWT con Supabase → inyecta `client.user` → `AuthGateway` pasa el usuario a `AuthService.syncProfile` → hace upsert del perfil en la tabla `usuario`.
-
-### `src/modules/main` (home)
-
-Gestiona el inventario de alimentos (despensa).
-
-| Archivo           | Propósito                                                |
-| ----------------- | -------------------------------------------------------- |
-| `home.gateway.ts` | Gateway WS. Evento `home:analyze_image` → llama a Gemini |
-| `home.service.ts` | Integración con Google Gemini (`gemini-2.0-flash`)       |
-| `home.module.ts`  | Módulo NestJS                                            |
-
-**Evento WebSocket:**
-
-```
-Emitir:  home:analyze_image   { imageBase64: string, token: string }
-Recibir: home:analyze_image   ApiResponse<Array<{ name: string, category: string, quantity: string }>>
-```
-
-**Notas importantes:**
-
-- El `imageBase64` puede incluir el header `data:image/jpeg;base64,...` — el service lo limpia automáticamente.
-- El payload máximo aceptado es **20MB** (configurado en `main.ts` con `body-parser`).
-- El modelo de Gemini usado es `gemini-2.0-flash` (velocidad + calidad balanceadas).
-- La respuesta se fuerza a JSON via `responseMimeType: 'application/json'` y un `responseSchema` estricto.
-
----
-
-## 6. Infraestructura Común (`src/common/`)
-
-### `ApiResponse<T>` — `src/common/classes/api-response.class.ts`
-
-DTO unificado para **todas** las respuestas WebSocket:
-
-```typescript
-class ApiResponse<T = unknown> {
   success: boolean;
-  data: T | null;
-  message: string | string[] | null;
-
-  static success<T>(data: T, message?: string): ApiResponse<T>;
-  static error(message: string | string[]): ApiResponse<null>;
-}
-```
-
-> **Regla:** Toda caso de uso siempre retorna `ApiResponse`. Nunca retornar objetos planos.
-
-### `WsAuthGuard` — `src/common/guards/ws-auth.guard.ts`
-
-Guard de autenticación para eventos WebSocket.
-
-- Lee el token desde `data.token` (payload del evento) o `client.handshake.auth.token` (conexión inicial).
-- Valida el token con `supabase.auth.getUser(token)`.
-- Si es válido, inyecta el usuario en `client.user` para consumo del Gateway.
-- Si `SUPABASE_URL` / `SUPABASE_KEY` no está configurado, simula autenticación exitosa con `test-user-id` (**solo para desarrollo local**).
-
-```typescript
-// En el cliente (frontend), pasar el token al conectar:
-const socket = io('http://localhost:3000', {
-  auth: { token: supabaseSession.access_token },
-});
-
-// O en cada evento:
-socket.emit('home:analyze_image', {
-  imageBase64: '...',
-  token: supabaseSession.access_token,
-});
-```
-
-### `WsExceptionFilter` — `src/common/filters/ws-exception.filter.ts`
-
-Filtro global de excepciones para WebSockets.
-
-- Captura `WsException`, `HttpException` y `Error` genéricos.
-- Emite el error al cliente como `ApiResponse.error(message)` via el evento `'exception'`.
-
-```typescript
-// El cliente debe escuchar:
-socket.on('exception', (response: ApiResponse) => {
-  console.error(response.message);
-});
-```
-
-### Interfaces WS — `src/common/interfaces/ws.interface.ts`
-
-```typescript
-interface ApiResponse<T = any> {
-  success: boolean;
-  data: T;
-  message: string;
-}
-interface ClientRequest<T = any> {
-  token?: string;
-  event: string;
-  body: T;
+  data: any | null;
+  message: string | null;
 }
 ```
 
 ---
 
-## 7. Esquema de Base de Datos (Supabase / PostgreSQL)
+## 8. Scripts de Desarrollo
 
-### Tabla `usuario`
+- `npm run start:dev`: Inicia la API en modo watch (Escucha en `0.0.0.0:3000`).
+- `npx prisma generate`: Genera el cliente de Prisma tras cambios en el schema.
+- `npx prisma db push`: Sincroniza el schema con Supabase.
 
-```sql
-id                  UUID PRIMARY KEY (generado por Supabase Auth)
-nombre              TEXT
-correo              TEXT UNIQUE
-peso                NUMERIC          -- kg, para cálculo de IMC
-talla               NUMERIC          -- cm, para cálculo de IMC
-imc                 NUMERIC          -- para cálculo de gasto calórico
-fecha_nacimiento    DATE
-nivel_actividad     INTEGER          -- Rango 1-5
-informacion_medica  JSONB            -- Array []string
-alimentos_prohibidos TEXT[]          -- Array de tags (ej. ["gluten", "lactosa"])
-preferencias        TEXT[]           -- Array de tags (ej. ["vegano", "sin_picante"])
-created_at          TIMESTAMPTZ DEFAULT now()
+---
+
+## 9. Variables de Entorno (.env)
+
+```env
+PORT=3000
+SUPABASE_URL=...
+SUPABASE_KEY=... # Publishable key
+SUPABASE_SERVICE_ROLE_KEY=... # Para bypass de RLS
+DATABASE_URL=... # URL de conexión directa o pooler
+GEMINI_API_KEY=...
 ```
-
-### Tabla `comida`
-
-```sql
-id                          UUID PRIMARY KEY
-id_usuario                  UUID REFERENCES usuario(id)
-nombre                      TEXT            -- Manual o generado por IA
-descripcion                 TEXT            -- Manual o generado por IA
-fecha_hora_compra           TIMESTAMPTZ     -- Cuando se registró en la despensa
-fecha_estimada_vencimiento  DATE            -- Calculada por IA o ingresada manualmente
-tags                        TEXT[]          -- Generados por IA (ej. ["pollo", "proteína", "carne"])
-estado                      TEXT            -- Enum: 'Por consumir' | 'Consumido' | 'Descartado'
-created_at                  TIMESTAMPTZ DEFAULT now()
-```
-
-> Al crear interfaces TypeScript para estos modelos, mapear exactamente estos campos. Los arrays de JSONB/text[] se tipan como `object[]` o `string[]` respectivamente.
-
----
-
-## 8. Gateway Principal (Core) — `src/core/gateways/app.gateway.ts`
-
-Gateway base aplicable a nivel de toda la app. Usado para eventos globales (conexión/desconexión general, health checks, etc.). Los módulos específicos tienen sus propios Gateways.
-
----
-
-## 9. Convenciones de Código
-
-| Concepto             | Convención                                                                             |
-| -------------------- | -------------------------------------------------------------------------------------- |
-| Módulos              | `src/modules/<nombre>/` en kebab-case                                                  |
-| Gateways             | `<modulo o caso de uso>.gateway.ts`, clase `<Modulo>Gateway`                           |
-| Services             | `<servicio externo>.service.ts`, clase `<Modulo>Service` con `@Injectable()`           |
-| Módulos NestJS       | `<modulo o caso de uso>.module.ts`, registra gateway + service + data                  |
-| Eventos WS           | `modulo:accion` en snake_case (ej. `home:analyze_image`, `auth:sync`)                  |
-| Respuestas           | Siempre `ApiResponse.success(data, msg)` o `ApiResponse.error(msg)`                    |
-| Variables de entorno | Acceder **solo** via `ConfigService`, nunca `process.env` directamente                 |
-
----
-
-## 10. Configuración Global (`src/main.ts`)
-
-| Configuración  | Detalle                                                            |
-| -------------- | ------------------------------------------------------------------ |
-| Body parser    | JSON y urlencoded hasta **20MB** (necesario para imágenes base64)  |
-| ValidationPipe | `whitelist: true`, `forbidNonWhitelisted: true`, `transform: true` |
-| CORS HTTP      | Origen `http://localhost:5173`, métodos GET/POST/PUT/DELETE/PATCH  |
-| CORS WS        | `{ origin: '*' }` en cada `@WebSocketGateway`                      |
-| Shutdown hooks | `app.enableShutdownHooks()` evita apagado abrupto                  |
-
----
-
-## 11. Reglas Críticas de Desarrollo
-
-1. **WebSockets primero.** Todo endpoint nuevo debe ser un `@SubscribeMessage` en un Gateway. Solo usar HTTP REST para webhooks de terceros que lo requieran explícitamente.
-2. **`ApiResponse` siempre.** Ningún Gateway devuelve un objeto plano. Usa `ApiResponse.success` o `ApiResponse.error`.
-3. **Gemini en Service.** Toda llamada a `@google/genai` va en la capa Service. El Gateway nunca instancia `GoogleGenAI` directamente.
-4. **Supabase en Data.** Toda consulta SQL/SDK de Supabase va en la capa Data. El Service nunca hace `createClient` para consultas.
-5. **ConfigService para env vars.** Siempre inyectar `ConfigService` para leer variables de entorno.
-6. **Tipado estricto.** TypeScript obligatorio. Los `any` deben ser justificados con comentario explícito.
-7. **Token en Guard, no en lógica.** La validación del JWT de Supabase ocurre exclusivamente en `WsAuthGuard`. Los Gateways asumen que `client.user` ya está disponible.
