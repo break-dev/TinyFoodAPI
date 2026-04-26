@@ -26,7 +26,7 @@ export class AuthGateway {
 
     // Si existe, lo vinculamos al socket para futuras peticiones
     if (response.success) {
-      client.dbUser = response.data as unknown;
+      client.usuario = response.data as unknown;
     }
 
     return response;
@@ -68,7 +68,7 @@ export class AuthGateway {
       });
 
       if (response.success) {
-        client.dbUser = response.data as unknown;
+        client.usuario = response.data as unknown;
       }
 
       return response;

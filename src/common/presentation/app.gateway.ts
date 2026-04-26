@@ -20,11 +20,11 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private logger: Logger = new Logger('AppGateway');
 
   handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`);
+    this.logger.log(`Cliente conectado: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
+    this.logger.log(`Cliente desconectado: ${client.id}`);
   }
 
   // Utility to send standard responses

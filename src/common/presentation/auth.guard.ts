@@ -23,17 +23,17 @@ export class AuthGuard implements CanActivate {
       client.user = user;
 
       // Buscamos en nuestra base de datos local usando el ID de Supabase
-      const dbUser = await AuthData.findUserBySupabaseId(user.id);
+      const usuario = await AuthData.findUserBySupabaseId(user.id);
 
       // Si no existe en la BD y no es un evento de inicio (autenticar/registrar), bloqueamos
       const isAuthEvent =
         data?.event === 'auth:autenticar' || data?.event === 'auth:registrar';
-      if (!dbUser && !isAuthEvent) {
+      if (!usuario && !isAuthEvent) {
         throw new WsException('Usuario no registrado localmente');
       }
 
       // Adjuntamos el usuario de la BD al socket
-      client.dbUser = dbUser as any;
+      client.usuario = usuario as any;
 
       return true;
     } catch (e) {
