@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsArray,
 } from 'class-validator';
 
 export class REQ_CrearUsuario {
@@ -40,11 +41,13 @@ export class REQ_CrearUsuario {
   @IsOptional()
   informacion_medica?: string;
 
-  @IsString()
+  @IsArray()
+  @IsString({ each: true })
   @IsOptional()
-  alimentos_prohibidos?: string;
+  alimentos_prohibidos?: string[];
 
-  @IsString()
+  @IsArray()
+  @IsString({ each: true })
   @IsOptional()
-  preferencias?: string;
+  preferencias?: string[];
 }

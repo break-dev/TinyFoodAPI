@@ -47,8 +47,10 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  await app.listen(PORT);
-  logger.log(`Aplicación corriendo en http://localhost:${PORT}/api`);
+  await app.listen(PORT, '0.0.0.0');
+  logger.log(
+    `Aplicación corriendo en http://${configService.get('HOST') || '0.0.0.0'}:${PORT}/api`,
+  );
 }
 
 void bootstrap();

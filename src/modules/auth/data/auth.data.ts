@@ -20,8 +20,8 @@ export class AuthData {
     fecha_nacimiento?: Date;
     nivel_actividad?: number;
     informacion_medica?: string;
-    alimentos_prohibidos?: string;
-    preferencias?: string;
+    alimentos_prohibidos?: string[];
+    preferencias?: string[];
   }) {
     return PrismaService.db.usuario.create({
       data: {

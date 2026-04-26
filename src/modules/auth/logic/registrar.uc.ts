@@ -15,8 +15,8 @@ export class UC_Registrar {
     fecha_nacimiento?: string; // Llega como string desde el front
     nivel_actividad?: number;
     informacion_medica?: string;
-    alimentos_prohibidos?: string;
-    preferencias?: string;
+    alimentos_prohibidos?: string[];
+    preferencias?: string[];
   }): Promise<ApiResponse> {
     try {
       // Verificación de seguridad usando id_supabase

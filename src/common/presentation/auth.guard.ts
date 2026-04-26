@@ -43,13 +43,31 @@ export class AuthGuard implements CanActivate {
   }
 
   /** Lógica de verificación estática para reutilización */
-  static async verify(token: string, config: ConfigService) {
-    const supabase = createClient(
-      config.get('SUPABASE_URL')!,
-      config.get('SUPABASE_KEY')!,
-    );
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data.user) throw new Error('Inválido');
-    return data.user;
+  static async verify(token: string, configService: ConfigService) {
+    try {
+      const supabaseUrl = configService.get<string>('SUPABASE_URL');
+      const supabaseKey = configService.get<string>('SUPABASE_KEY');
+
+      const supabase = createClient(supabaseUrl!, supabaseKey!);
+      const { data, error } = await supabase.auth.getUser(token);
+
+      if (error || !data.user) {
+        console.error(
+          `[AuthGuard] Error verificando token con Supabase:`,
+          error?.message,
+        );
+        throw new Error('Inválido');
+      }
+
+      console.log(
+        `[AuthGuard] Token verificado con Supabase para user: ${data.user.id}`,
+      );
+      return data.user;
+    } catch (error: any) {
+      console.error(
+        `[AuthGuard] Fallo crítico en verificación de token: ${error.message}`,
+      );
+      throw new WsException('Token inválido');
+    }
   }
 }
