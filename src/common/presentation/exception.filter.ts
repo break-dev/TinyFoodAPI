@@ -1,10 +1,11 @@
 import { Catch, ArgumentsHost, HttpException } from '@nestjs/common';
 import { BaseWsExceptionFilter, WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
-import { ApiResponse } from '../classes/api-response.class';
+import { ApiResponse } from '../logic/dtos/api.response';
+import { SendResponse } from '../utils/functions/api-response';
 
 @Catch()
-export class WsExceptionFilter extends BaseWsExceptionFilter {
+export class ExceptionFilter extends BaseWsExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const client = host.switchToWs().getClient<Socket>();
 
@@ -18,10 +19,8 @@ export class WsExceptionFilter extends BaseWsExceptionFilter {
       message = exception.message;
     }
 
-    const response: ApiResponse<null> = ApiResponse.error(message);
+    const response: ApiResponse<null> = SendResponse.error(message);
 
-    // Emit the error back to the client. We assume the client listens for its own specific error events
-    // or a global 'exception' event.
     client.emit('exception', response as any);
   }
 }

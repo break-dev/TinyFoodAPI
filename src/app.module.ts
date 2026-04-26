@@ -1,17 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PantryModule } from './modules/main/pantry.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { PublicGateway } from './common/presentation/gateways/public.gateway';
+import { PrivateGateway } from './common/presentation/gateways/private.gateway';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true, // Hace que las variables de entorno estén disponibles en cualquier módulo
+      isGlobal: true,
     }),
-    PantryModule,
     AuthModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [PublicGateway, PrivateGateway],
 })
 export class AppModule {}

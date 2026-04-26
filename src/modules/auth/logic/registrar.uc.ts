@@ -1,0 +1,45 @@
+import { AuthData } from '../data/auth.data';
+import { ApiResponse } from '../../../common/logic/dtos/api.response';
+import { SendResponse } from '../../../common/utils/functions/api-response';
+
+/**
+ * Registra al usuario con la información personal solicitada.
+ */
+export class UC_Registrar {
+  static async execute(data: {
+    id_supabase: string; // id de la tabla "users" de supabase
+    nombre: string;
+    url_foto?: string;
+    peso?: number;
+    talla?: number;
+    fecha_nacimiento?: string; // Llega como string desde el front
+    nivel_actividad?: number;
+    informacion_medica?: string;
+    alimentos_prohibidos?: string;
+    preferencias?: string;
+  }): Promise<ApiResponse> {
+    try {
+      // Verificación de seguridad usando id_supabase
+      const existe = await AuthData.findUserBySupabaseId(data.id_supabase);
+      if (existe) {
+        return SendResponse.error('USER_ALREADY_EXISTS');
+      }
+
+      const nuevoUsuario = await AuthData.crearUsuario({
+        ...data,
+        fecha_nacimiento: data.fecha_nacimiento
+          ? new Date(data.fecha_nacimiento)
+          : undefined,
+      });
+
+      return SendResponse.success(
+        nuevoUsuario,
+        'Registro completado con éxito',
+      );
+    } catch (error) {
+      return SendResponse.error(
+        `Error al registrar usuario: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+      );
+    }
+  }
+}

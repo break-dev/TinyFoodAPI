@@ -1,48 +1,83 @@
-import { SubscribeMessage, WebSocketGateway, ConnectedSocket } from '@nestjs/websockets';
-import { UseFilters, UseGuards } from '@nestjs/common';
-import { Socket } from 'socket.io';
-import { AuthService } from '../logic/auth.service';
-import { WsExceptionFilter } from '../../../common/filters/ws-exception.filter';
-import { WsAuthGuard } from '../../../common/guards/ws-auth.guard';
-import { ApiResponse } from '../../../common/classes/api-response.class';
+import { AuthSocket } from 'src/common/presentation/interfaces/auth-socket.interface';
+import { UC_Autenticar } from '../logic/autenticar.uc';
+import { UC_Registrar } from '../logic/registrar.uc';
+import { Dispatcher } from 'src/common/presentation/dispatcher';
+import { plainToInstance } from 'class-transformer';
+import { validateOrReject } from 'class-validator';
+import { REQ_CrearUsuario } from './dtos/crear-usuario.request';
+import { SendResponse } from 'src/common/utils/functions/api-response';
 
-@WebSocketGateway({ cors: { origin: '*' } })
-@UseFilters(WsExceptionFilter)
 export class AuthGateway {
-  constructor(private readonly authService: AuthService) {}
-
-  /**
-   * Evento: auth:sync
-   * Sincroniza el perfil del usuario en la tabla `usuario`.
-   * Llamar inmediatamente después de un login/registro exitoso.
-   *
-   * Payload: { token: string } (o token en handshake)
-   * Respuesta: ApiResponse<UsuarioData>
-   */
-  @UseGuards(WsAuthGuard)
-  @SubscribeMessage('auth:sync')
-  async handleSync(@ConnectedSocket() client: Socket): Promise<ApiResponse> {
-    const user = (client as any).user;
-    const profile = await this.authService.syncProfile(
-      user.id,
-      user.email,
-      user.user_metadata?.nombre,
-    );
-    return ApiResponse.success(profile, 'Perfil sincronizado');
+  // Registro de eventos para el flujo de autenticación/registro dual
+  static {
+    Dispatcher.registerPrivate({
+      'auth:autenticar': (client) =>
+        AuthGateway.autenticar(client as AuthSocket),
+      'auth:registrar': (client, data) =>
+        AuthGateway.registrar(client as AuthSocket, data),
+    });
   }
 
   /**
-   * Evento: auth:me
-   * Retorna el perfil completo del usuario autenticado.
-   *
-   * Payload: { token: string } (o token en handshake)
-   * Respuesta: ApiResponse<UsuarioData>
+   * Verificar si el usuario ya existe en la tabla "usuario" del schema public.
    */
-  @UseGuards(WsAuthGuard)
-  @SubscribeMessage('auth:me')
-  async handleMe(@ConnectedSocket() client: Socket): Promise<ApiResponse> {
-    const user = (client as any).user;
-    const profile = await this.authService.getProfile(user.id);
-    return ApiResponse.success(profile, 'Perfil obtenido');
+  static async autenticar(client: AuthSocket) {
+    const response = await UC_Autenticar.execute(client.user.id);
+
+    // Si existe, lo vinculamos al socket para futuras peticiones
+    if (response.success) {
+      client.dbUser = response.data as unknown;
+    }
+
+    return response;
+  }
+
+  /**
+   * Registra al usuario con datos personales adicionales.
+   */
+  static async registrar(client: AuthSocket, data: unknown) {
+    try {
+      const body = data as Record<string, any>;
+
+      // 1. Mapeamos la entrada al DTO (incluyendo datos de Supabase como fallback)
+      const payload = plainToInstance(REQ_CrearUsuario, {
+        ...body,
+        id_supabase: client.user.id,
+        nombre: (body?.nombre ||
+          client.user.user_metadata?.full_name ||
+          client.user.email?.split('@')[0]) as string,
+        urlFoto: (body?.url_foto ||
+          client.user.user_metadata?.avatar_url) as string,
+      });
+
+      // 2. Validamos de forma única para esta solicitud
+      await validateOrReject(payload);
+
+      // 3. Ejecutamos el caso de uso con el ID de Supabase
+      const response = await UC_Registrar.execute({
+        id_supabase: payload.id_supabase,
+        nombre: payload.nombre as string,
+        url_foto: payload.urlFoto,
+        peso: payload.peso,
+        talla: payload.talla,
+        fecha_nacimiento: payload.fecha_nacimiento,
+        nivel_actividad: payload.nivel_actividad,
+        informacion_medica: payload.informacion_medica,
+        alimentos_prohibidos: payload.alimentos_prohibidos,
+        preferencias: payload.preferencias,
+      });
+
+      if (response.success) {
+        client.dbUser = response.data as unknown;
+      }
+
+      return response;
+    } catch (error) {
+      return SendResponse.error(
+        error instanceof Array
+          ? 'Datos de registro inválidos'
+          : 'Error en el proceso de registro',
+      );
+    }
   }
 }

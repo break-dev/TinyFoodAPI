@@ -1,0 +1,17 @@
+model usuario {
+  id                   Int       @id @default(autoincrement())
+  id_supabase          String    @unique @db.Uuid
+  nombre               String
+  url_foto             String?
+  peso                 Decimal?  @db.Decimal
+  talla                Decimal?  @db.Decimal
+  fecha_nacimiento     DateTime? @db.Date
+  nivel_actividad      Decimal?  @db.Decimal
+  informacion_medica   String?
+  alimentos_prohibidos String?
+  preferencias         String?
+  created_at           DateTime  @default(now()) @db.Timestamptz
+  // Relaciones
+  // 1 - N
+  comidas              comida[]
+}

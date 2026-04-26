@@ -2,11 +2,19 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI, Type } from '@google/genai';
 
+export interface FoodItem {
+  name: string;
+  category: string;
+  quantity: string;
+}
+
 @Injectable()
-export class PantryService {
+export class GeminiService {
+  static instance: GeminiService;
   private ai: GoogleGenAI;
 
   constructor(private configService: ConfigService) {
+    GeminiService.instance = this;
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
     if (!apiKey) {
       console.warn(
@@ -18,7 +26,7 @@ export class PantryService {
     this.ai = new GoogleGenAI({ apiKey: apiKey || '' });
   }
 
-  async analyzeFoodImage(imageBase64: string): Promise<any> {
+  async analyzeFoodImage(imageBase64: string): Promise<FoodItem[]> {
     try {
       // Limpiamos el base64 si trae la cabecera (data:image/jpeg;base64,...)
       const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
@@ -55,7 +63,6 @@ export class PantryService {
       // El resultado de Gemini ahora vendrá estructurado uniformemente
       const responseText = response.text || '[]';
 
-      // Dado que indicamos responseMimeType, normalmente ya es un JSON parseable.
       // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return JSON.parse(responseText);
     } catch (error) {
