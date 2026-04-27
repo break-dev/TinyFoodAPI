@@ -14,7 +14,7 @@ export class UC_Registrar {
     talla?: number;
     fecha_nacimiento?: string; // Llega como string desde el front
     nivel_actividad?: number;
-    informacion_medica?: string;
+    informacion_medica?: { nombre: string; descripcion?: string }[]; // Recibe el JSON array validado
     alimentos_prohibidos?: string[];
     preferencias?: string[];
   }): Promise<ApiResponse> {

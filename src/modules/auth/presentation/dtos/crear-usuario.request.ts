@@ -6,7 +6,19 @@ import {
   IsString,
   IsUrl,
   IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class InfoMedicaDto {
+  @IsString()
+  @IsNotEmpty()
+  nombre: string;
+
+  @IsString()
+  @IsOptional()
+  descripcion?: string;
+}
 
 export class REQ_CrearUsuario {
   @IsString()
@@ -37,9 +49,11 @@ export class REQ_CrearUsuario {
   @IsOptional()
   nivel_actividad?: number;
 
-  @IsString()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InfoMedicaDto)
   @IsOptional()
-  informacion_medica?: string;
+  informacion_medica?: InfoMedicaDto[];
 
   @IsArray()
   @IsString({ each: true })

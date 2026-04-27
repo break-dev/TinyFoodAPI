@@ -19,7 +19,7 @@ export class AuthData {
     talla?: number;
     fecha_nacimiento?: Date;
     nivel_actividad?: number;
-    informacion_medica?: string;
+    informacion_medica?: { nombre: string; descripcion?: string }[];
     alimentos_prohibidos?: string[];
     preferencias?: string[];
   }) {
