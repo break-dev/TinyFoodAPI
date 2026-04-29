@@ -16,7 +16,7 @@ export class UserGateway {
 
   static async actualizarPerfil(client: AuthSocket, data: unknown) {
     try {
-    // Verificar que el usuario esté autenticado en el socket
+      // Verificar que el usuario esté autenticado en el socket
       if (!client.usuario) {
         return SendResponse.error('Usuario no autenticado');
       }
@@ -24,7 +24,7 @@ export class UserGateway {
       await validateOrReject(payload);
 
       return await UC_ActualizarPerfil.execute(
-        client.usuario.id,  // ID interno del usuario ya autenticado
+        client.usuario.id, // ID interno del usuario ya autenticado
         payload,
       );
     } catch (error) {

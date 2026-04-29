@@ -4,5 +4,5 @@ import { IUser } from './usuario.interface';
 
 export interface AuthSocket extends Socket {
   user: User;
-  usuario?: IUser; // Usuario de la tabla "usuario" del schema public(unknown para seguridad de tipos)
+  usuario?: IUser; // Usuario de la tabla "usuario" del schema public
 }

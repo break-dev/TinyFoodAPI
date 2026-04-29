@@ -3,7 +3,6 @@ import { UseFilters } from '@nestjs/common';
 import { ExceptionFilter } from '../exception.filter';
 import { Dispatcher } from '../dispatcher';
 import { Socket } from 'socket.io';
-
 import { ClientRequest } from '../dtos/client.request';
 
 /**

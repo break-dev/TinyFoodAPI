@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { PrismaService } from '../../../common/service/prisma.service';
 
 interface Condicion {
@@ -5,7 +6,6 @@ interface Condicion {
   descripcion: string;
 }
 export class UserData {
-
   /** Buscar usuario por su ID interno de la BD */
   static async findById(id: number) {
     return PrismaService.db.usuario.findUnique({
@@ -14,21 +14,24 @@ export class UserData {
   }
 
   /** Actualizar los datos editables del perfil */
-  static async actualizarPerfil(id: number, payload: {
-    peso?: number;
-    talla?: number;
-    fecha_nacimiento?: Date;
-    nivel_actividad?: number;
-    informacion_medica?: Condicion[];
-    alimentos_prohibidos?: string[];
-    preferencias?: string[];
-  }) {
-    return PrismaService.db.usuario.update({
-    where: { id },
-    data: {
-      ...payload,
-      informacion_medica: payload.informacion_medica as any,
+  static async actualizarPerfil(
+    id: number,
+    payload: {
+      peso?: number;
+      talla?: number;
+      fecha_nacimiento?: Date;
+      nivel_actividad?: number;
+      informacion_medica?: Condicion[];
+      alimentos_prohibidos?: string[];
+      preferencias?: string[];
     },
-  });
+  ) {
+    return PrismaService.db.usuario.update({
+      where: { id },
+      data: {
+        ...payload,
+        informacion_medica: payload.informacion_medica as any,
+      },
+    });
   }
 }

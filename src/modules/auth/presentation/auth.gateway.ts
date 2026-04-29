@@ -6,7 +6,7 @@ import { plainToInstance } from 'class-transformer';
 import { validateOrReject } from 'class-validator';
 import { REQ_CrearUsuario } from './dtos/crear-usuario.request';
 import { SendResponse } from 'src/common/utils/functions/api-response';
-import { IUser} from 'src/common/presentation/interfaces/usuario.interface';
+import { IUser } from 'src/common/presentation/interfaces/usuario.interface';
 
 export class AuthGateway {
   // Registro de eventos para el flujo de autenticación/registro dual

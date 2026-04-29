@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   WebSocketGateway,
   OnGatewayConnection,
@@ -10,7 +13,6 @@ import { ExceptionFilter } from '../exception.filter';
 import { Dispatcher } from '../dispatcher';
 import type { AuthSocket } from '../interfaces/auth-socket.interface';
 import { AuthData } from 'src/modules/auth/data/auth.data';
-
 import { ClientRequest } from '../dtos/client.request';
 
 /**
