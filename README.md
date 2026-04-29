@@ -10,7 +10,7 @@
 
 1. El cliente móvil conecta vía WebSocket.
 2. Se autentica mediante el JWT de Supabase (validado en el `AuthGuard`).
-3. Envía eventos (`auth:autenticar`, `home:analyze_image`, etc.).
+3. Envía eventos (`auth:autenticar`, `despensa:analyze_image`, etc.).
 4. La API procesa, persiste en PostgreSQL (Supabase) y responde mediante un callback (Acknowledgement).
 
 ---
