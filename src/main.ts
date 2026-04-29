@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
@@ -51,6 +52,22 @@ async function bootstrap() {
   logger.log(
     `Aplicación corriendo en http://${configService.get('HOST') || '0.0.0.0'}:${PORT}/api`,
   );
+
+  // Lógica para mantener activa la instancia en Render (Free Tier)
+  const renderUrl = configService.get<string>('RENDER_EXTERNAL_URL');
+  if (renderUrl) {
+    const interval = 10 * 60 * 1000; // 10 minutos (Render apaga tras 15 min de inactividad)
+    setInterval(() => {
+      fetch(`${renderUrl}/health`)
+        .then((res) =>
+          logger.log(`Keep-alive ping exitoso: ${res.status} (${renderUrl})`),
+        )
+        .catch((err) =>
+          logger.error(`Error en keep-alive ping: ${err.message}`),
+        );
+    }, interval);
+    logger.log(`Auto-ping activado para: ${renderUrl}/health`);
+  }
 }
 
 void bootstrap();

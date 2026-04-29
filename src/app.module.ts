@@ -5,6 +5,7 @@ import { PublicGateway } from './common/presentation/gateways/public.gateway';
 import { PrivateGateway } from './common/presentation/gateways/private.gateway';
 import { UserModule } from './modules/usuario/user.module';
 import { DespensaModule } from './modules/despensa/despensa.module';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { DespensaModule } from './modules/despensa/despensa.module';
     UserModule,
     DespensaModule,
   ],
-  controllers: [],
+  controllers: [AppController],
   providers: [PublicGateway, PrivateGateway],
 })
 export class AppModule {}
