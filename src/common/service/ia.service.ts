@@ -88,13 +88,13 @@ export class IAService implements OnModuleInit {
         this.activeModelsCache,
       );
 
-      // Prioridades de fallbacks para texto / estructurado
+      // Prioridades de fallbacks para texto / estructurado (modelos con soporte strict: true)
       const preferredText = [
         this.configService.get<string>('GROQ_MODEL_TEXT'),
         'openai/gpt-oss-120b',
+        'openai/gpt-oss-20b',
         'llama-3.3-70b-versatile',
         'llama-3.1-8b-instant',
-        'openai/gpt-oss-20b',
       ].filter(Boolean) as string[];
 
       const activeText = preferredText.find((m) =>
@@ -198,6 +198,7 @@ export class IAService implements OnModuleInit {
         type: 'json_schema' as const,
         json_schema: {
           name: schemaName,
+          strict: true,
           schema,
         },
       };
@@ -205,7 +206,7 @@ export class IAService implements OnModuleInit {
       responseFormat = { type: 'json_object' as const };
     }
 
-    const maxTokens = isVision ? 2500 : 1500;
+    const maxTokens = isVision ? 2500 : 4000;
 
     const executeCall = async (params: any) => {
       const completion = await this.instance.groq.chat.completions.create(
