@@ -47,10 +47,12 @@ const RECETA_SCHEMA = {
           'calorias_aprox',
           'emoji',
         ],
+        additionalProperties: false,
       },
     },
   },
   required: ['recetas'],
+  additionalProperties: false,
 };
 
 // Genera recetas personalizadas usando los alimentos disponibles del usuario,

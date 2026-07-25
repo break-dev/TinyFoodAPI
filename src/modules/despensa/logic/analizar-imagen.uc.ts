@@ -36,10 +36,7 @@ export class UC_AnalizarImagen {
               properties: {
                 nombre: { type: 'string' },
                 cantidad: { type: 'string' },
-                categoria: {
-                  type: 'string',
-                  enum: FoodTags,
-                },
+                categoria: { type: 'string' },
                 tags: {
                   type: 'array',
                   items: {
