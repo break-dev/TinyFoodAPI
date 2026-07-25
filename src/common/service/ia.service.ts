@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import Groq from 'groq-sdk';
 import { getDataUrlFromB64 } from '../utils/functions/get-data-url-from-b64';
 
-// Servicio de IA centralizado con autodetección de modelos de Groq y resiliencia total contra errores de proxy JSON.
+// Servicio de IA centralizado con autodetección de modelos de Groq, pipeline de 2 pasos para visión y resiliencia contra rate limits.
 @Injectable()
 export class IAService implements OnModuleInit {
   static instance: IAService;
@@ -39,6 +39,10 @@ export class IAService implements OnModuleInit {
     await this.syncActiveModels();
   }
 
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   /**
    * Limpia etiquetas de pensamiento (<think>...</think>), bloques markdown y extrae el objeto JSON válido.
    */
@@ -46,7 +50,7 @@ export class IAService implements OnModuleInit {
     let cleaned = raw
       // Eliminar etiqueta <think> cerrada normalmente
       .replace(/<think>[\s\S]*?<\/think>/gi, '')
-      // Eliminar etiqueta <think> sin cerrar (stream truncado o modelo de razonamiento con salida parcial)
+      // Eliminar etiqueta <think> sin cerrar (stream truncado o salida parcial)
       .replace(/<think>[\s\S]*/gi, '')
       // Limpiar bloques de código markdown
       .replace(/^```json\s*/i, '')
@@ -59,6 +63,10 @@ export class IAService implements OnModuleInit {
 
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    } else {
+      throw new Error(
+        `[IAService] No se encontró un objeto JSON en la respuesta de la IA. Contenido recibido: "${cleaned.substring(0, 120)}..."`,
+      );
     }
 
     return JSON.parse(cleaned) as T;
@@ -100,6 +108,8 @@ export class IAService implements OnModuleInit {
       // Prioridades de fallbacks para visión
       const preferredVision = [
         this.configService.get<string>('GROQ_MODEL_VISION'),
+        'llama-3.2-11b-vision-preview',
+        'llama-3.2-90b-vision-instruct',
         'qwen/qwen3.6-27b',
       ].filter(Boolean) as string[];
 
@@ -122,8 +132,8 @@ export class IAService implements OnModuleInit {
   }
 
   /**
-   * Método genérico privado para interactuar con Groq, con tolerancia a fallos
-   * y compatibilidad total con modelos de razonamiento (thinking models) y visión.
+   * Método genérico privado para interactuar con Groq, con tolerancia a fallos,
+   * manejo de 429 rate limits y compatibilidad con modelos de razonamiento.
    */
   private static async requestGroq<T>({
     model,
@@ -132,6 +142,7 @@ export class IAService implements OnModuleInit {
     schemaName = 'response_schema',
     temperature = 0.4,
     isVision = false,
+    rawTextOnly = false,
   }: {
     model: string;
     messages: any[];
@@ -139,6 +150,7 @@ export class IAService implements OnModuleInit {
     schemaName?: string;
     temperature?: number;
     isVision?: boolean;
+    rawTextOnly?: boolean;
   }): Promise<T> {
     if (!this.instance) {
       throw new Error('[IAService] Instancia no inicializada');
@@ -146,9 +158,8 @@ export class IAService implements OnModuleInit {
 
     let currentMessages = JSON.parse(JSON.stringify(messages));
 
-    // Inyectar esquema en el prompt si se requiere
     const injectSchemaPrompt = () => {
-      if (!schema) return;
+      if (!schema || rawTextOnly) return;
       const schemaPrompt = `\n\n[REGLA DE FORMATO OBLIGATORIA]: Responde ÚNICAMENTE con un OBJETO JSON válido (un objeto que comience con '{' y termine con '}') que cumpla estrictamente con esta estructura:\n${JSON.stringify(schema, null, 2)}`;
 
       const lastIndex = currentMessages.length - 1;
@@ -169,11 +180,18 @@ export class IAService implements OnModuleInit {
       }
     };
 
-    // Para modelos de visión o razonamiento, omitir response_format para evitar que el proxy de Groq
-    // rechace etiquetas <think> con 'json_validate_failed', y parsear el JSON manualmente.
+    const cleanRawText = (raw: string): string => {
+      return raw
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<think>[\s\S]*/gi, '')
+        .replace(/^```[a-z]*\s*/i, '')
+        .replace(/\s*```$/, '')
+        .trim();
+    };
+
     let responseFormat: any = undefined;
-    if (isVision) {
-      injectSchemaPrompt();
+    if (isVision || rawTextOnly) {
+      if (!rawTextOnly) injectSchemaPrompt();
       responseFormat = undefined;
     } else if (schema) {
       responseFormat = {
@@ -189,6 +207,27 @@ export class IAService implements OnModuleInit {
 
     const maxTokens = isVision ? 2500 : 1500;
 
+    const executeCall = async (params: any) => {
+      const completion = await this.instance.groq.chat.completions.create(
+        params,
+      );
+      const raw = completion.choices[0]?.message?.content ?? '';
+      if (rawTextOnly) {
+        return cleanRawText(raw) as unknown as T;
+      }
+      return this.cleanAndParseJson<T>(raw);
+    };
+
+    const isRateLimitError = (err: any) => {
+      const msg = String(err?.message || err || '');
+      return (
+        err?.status === 429 ||
+        err?.code === 'rate_limit_exceeded' ||
+        msg.includes('429') ||
+        msg.includes('rate_limit_exceeded')
+      );
+    };
+
     // --- NIVEL 1: Petición principal ---
     try {
       const completionParams: any = {
@@ -202,15 +241,17 @@ export class IAService implements OnModuleInit {
         completionParams.response_format = responseFormat;
       }
 
-      const completion = await this.instance.groq.chat.completions.create(
-        completionParams,
-      );
-
-      const raw = completion.choices[0]?.message?.content ?? '{}';
-      return this.cleanAndParseJson<T>(raw);
+      return await executeCall(completionParams);
     } catch (error: any) {
       const errMsg = String(error?.message || error || '');
       console.warn(`[IAService] Nivel 1 falló para modelo '${model}': ${errMsg}`);
+
+      if (isRateLimitError(error)) {
+        console.warn(
+          '[IAService] Rate limit detectado (429). Esperando 4 segundos antes de reintentar...',
+        );
+        await this.delay(4000);
+      }
 
       if (schema && responseFormat?.type === 'json_schema') {
         injectSchemaPrompt();
@@ -220,22 +261,20 @@ export class IAService implements OnModuleInit {
           console.log(
             `[IAService] Nivel 2: Reintentando '${model}' con json_object...`,
           );
-          const completionFallback =
-            await this.instance.groq.chat.completions.create({
-              model,
-              messages: currentMessages,
-              temperature,
-              max_tokens: maxTokens,
-              response_format: { type: 'json_object' as const },
-            });
-
-          const rawFallback =
-            completionFallback.choices[0]?.message?.content ?? '{}';
-          return this.cleanAndParseJson<T>(rawFallback);
+          return await executeCall({
+            model,
+            messages: currentMessages,
+            temperature,
+            max_tokens: maxTokens,
+            response_format: { type: 'json_object' as const },
+          });
         } catch (fallbackError: any) {
           console.warn(
             `[IAService] Nivel 2 falló para '${model}': ${fallbackError?.message}`,
           );
+          if (isRateLimitError(fallbackError)) {
+            await this.delay(4000);
+          }
         }
       }
 
@@ -244,17 +283,17 @@ export class IAService implements OnModuleInit {
         console.log(
           `[IAService] Nivel 3: Reintentando '${model}' sin response_format para permitir parsing manual...`,
         );
-        const completionRaw = await this.instance.groq.chat.completions.create({
+        return await executeCall({
           model,
           messages: currentMessages,
           temperature,
           max_tokens: maxTokens,
         });
-
-        const rawContent = completionRaw.choices[0]?.message?.content ?? '{}';
-        return this.cleanAndParseJson<T>(rawContent);
-      } catch (rawError) {
-        console.error('[IAService] Nivel 3 también falló:', rawError);
+      } catch (rawError: any) {
+        console.error(
+          '[IAService] Nivel 3 también falló:',
+          rawError?.message || rawError,
+        );
         throw new Error('Error al procesar la solicitud con la IA.');
       }
     }
@@ -287,6 +326,11 @@ export class IAService implements OnModuleInit {
     });
   }
 
+  /**
+   * Pipeline en 2 pasos para análisis de imagen:
+   * 1. Extracción de Visión: El modelo de visión analiza la imagen y genera una descripción textual.
+   * 2. Estructuración JSON: El modelo de texto estructurado convierte la descripción textual al esquema JSON final.
+   */
   static async analyzeImage<T>(
     foto_b64: string,
     prompt: string,
@@ -298,27 +342,49 @@ export class IAService implements OnModuleInit {
     }
     const dataUrl = await getDataUrlFromB64(foto_b64);
 
-    return this.requestGroq<T>({
-      model: this.instance.modelVision,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: { url: dataUrl },
-            },
-            {
-              type: 'text',
-              text: prompt,
-            },
-          ],
-        },
-      ],
-      schema,
-      schemaName,
-      temperature: 0.4,
-      isVision: true,
-    });
+    // PASO 1: Obtener la identificación de alimentos del modelo de Visión en texto plano
+    const visionPrompt = `${prompt}\n\n[INSTRUCCIÓN DE SALIDA DE VISIÓN]: Analiza la imagen y describe detalladamente todos los alimentos, cantidades, categorías y etiquetas identificadas en texto plano ordenado. NO generes código JSON ni etiquetas <think>.`;
+
+    let descripcionTextual: string;
+    try {
+      descripcionTextual = await this.requestGroq<string>({
+        model: this.instance.modelVision,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: dataUrl },
+              },
+              {
+                type: 'text',
+                text: visionPrompt,
+              },
+            ],
+          },
+        ],
+        temperature: 0.3,
+        isVision: true,
+        rawTextOnly: true,
+      });
+    } catch (visionError) {
+      console.warn(
+        '[IAService] Falló el paso de visión del pipeline de imagen:',
+        visionError,
+      );
+      throw visionError;
+    }
+
+    if (!descripcionTextual || descripcionTextual.trim().length === 0) {
+      throw new Error(
+        '[IAService] El modelo de visión no devolvió ningún texto descriptivo.',
+      );
+    }
+
+    // PASO 2: Transformar la descripción del modelo de visión a JSON Estructurado usando el Modelo de Texto
+    const structuringPrompt = `A continuación se presenta el resultado del análisis de visión de una foto de alimentos:\n\n"""\n${descripcionTextual}\n"""\n\nCon base en esa descripción, extrae la información requerida y genera el resultado final respetando todas las reglas solicitadas:\n${prompt}`;
+
+    return this.generate<T>(structuringPrompt, schema, schemaName);
   }
 }

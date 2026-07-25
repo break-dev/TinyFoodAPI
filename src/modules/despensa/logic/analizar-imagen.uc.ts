@@ -24,8 +24,6 @@ export class UC_AnalizarImagen {
 
       Para las etiquetas (tags) de cada alimento, selecciona estrictamente de la siguiente lista de etiquetas disponibles (elige entre 3 y 6 etiquetas):
       ${FoodTags.join(', ')}
-
-      [REGLA DE FORMATO OBLIGATORIA]: Devuelve ÚNICAMENTE un OBJETO JSON que comience con '{' y termine con '}' con la propiedad raíz "alimentos".
       `.trim();
 
       const schema = {
