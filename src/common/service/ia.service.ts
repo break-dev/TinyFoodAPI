@@ -183,12 +183,8 @@ export class IAService implements OnModuleInit {
     };
 
     const cleanRawText = (raw: string): string => {
-      let text = raw;
-      if (text.includes('</think>')) {
-        text = text.split('</think>').pop() || '';
-      } else if (text.includes('<think>')) {
-        text = text.replace(/<think>/gi, '');
-      }
+      // Elimina el bloque completo de pensamiento y su contenido
+      let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
       return text
         .replace(/^```[a-z]*\s*/i, '')
         .replace(/\s*```$/, '')
@@ -215,12 +211,11 @@ export class IAService implements OnModuleInit {
     const maxTokens = 4000;
 
     const executeCall = async (params: any) => {
-      const completion = await this.instance.groq.chat.completions.create(
-        params,
-      );
+      const completion =
+        await this.instance.groq.chat.completions.create(params);
       const raw = completion.choices[0]?.message?.content ?? '';
       if (rawTextOnly) {
-        return cleanRawText(raw) as unknown as T;
+        return IAService.cleanRawText(raw) as unknown as T;
       }
       return this.cleanAndParseJson<T>(raw);
     };
@@ -251,7 +246,9 @@ export class IAService implements OnModuleInit {
       return await executeCall(completionParams);
     } catch (error: any) {
       const errMsg = String(error?.message || error || '');
-      console.warn(`[IAService] Nivel 1 falló para modelo '${model}': ${errMsg}`);
+      console.warn(
+        `[IAService] Nivel 1 falló para modelo '${model}': ${errMsg}`,
+      );
 
       if (isRateLimitError(error)) {
         console.warn(
