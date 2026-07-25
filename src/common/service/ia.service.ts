@@ -73,6 +73,17 @@ export class IAService implements OnModuleInit {
 
     return JSON.parse(cleaned) as T;
   }
+  /**
+   * Limpia etiquetas de pensamiento (<think>...</think>) por completo, bloques markdown y extrae el texto plano.
+   */
+  private static cleanRawText(raw: string): string {
+    // Elimina el bloque completo de pensamiento y su contenido
+    let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    return text
+      .replace(/^```[a-z]*\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
+  }
 
   /**
    * Sincroniza dinámicamente la lista de modelos activos ofrecidos por Groq
@@ -180,15 +191,6 @@ export class IAService implements OnModuleInit {
           ),
         };
       }
-    };
-
-    const cleanRawText = (raw: string): string => {
-      // Elimina el bloque completo de pensamiento y su contenido
-      let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-      return text
-        .replace(/^```[a-z]*\s*/i, '')
-        .replace(/\s*```$/, '')
-        .trim();
     };
 
     let responseFormat: any = undefined;
