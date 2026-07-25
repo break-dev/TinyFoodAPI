@@ -10,6 +10,17 @@ interface RES_TipDiario {
   emoji: string;
 }
 
+const TIP_SCHEMA = {
+  type: 'object',
+  properties: {
+    titulo: { type: 'string' },
+    consejo: { type: 'string' },
+    urgencia: { type: 'string', enum: ['alta', 'media', 'baja'] },
+    emoji: { type: 'string' },
+  },
+  required: ['titulo', 'consejo', 'urgencia', 'emoji'],
+};
+
 export class UC_TipDiario {
   static async execute(
     id_usuario: number,
@@ -114,7 +125,10 @@ Devuelve ÚNICAMENTE este JSON:
 }`.trim();
       }
 
-      const resultado = await IAService.generate<RES_TipDiario>(prompt);
+      const resultado = await IAService.generate<RES_TipDiario>(
+        prompt,
+        TIP_SCHEMA,
+      );
 
       return SendResponse.success(
         {

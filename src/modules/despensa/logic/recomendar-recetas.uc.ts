@@ -104,7 +104,6 @@ export class UC_RecomendarRecetas {
       const response = await IAService.generate<{ recetas: RES_Receta[] }>(
         prompt,
         RECETA_SCHEMA,
-        'recomendar_recetas',
       );
 
       const resultado = response?.recetas || [];
