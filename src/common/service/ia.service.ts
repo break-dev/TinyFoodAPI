@@ -47,12 +47,14 @@ export class IAService implements OnModuleInit {
    * Limpia etiquetas de pensamiento (<think>...</think>), bloques markdown y extrae el objeto JSON válido.
    */
   private static cleanAndParseJson<T>(raw: string): T {
-    let cleaned = raw
-      // Eliminar etiqueta <think> cerrada normalmente
-      .replace(/<think>[\s\S]*?<\/think>/gi, '')
-      // Eliminar etiqueta <think> sin cerrar (stream truncado o salida parcial)
-      .replace(/<think>[\s\S]*/gi, '')
-      // Limpiar bloques de código markdown
+    let cleaned = raw;
+    if (cleaned.includes('</think>')) {
+      cleaned = cleaned.split('</think>').pop() || '';
+    } else if (cleaned.includes('<think>')) {
+      cleaned = cleaned.replace(/<think>/gi, '');
+    }
+
+    cleaned = cleaned
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
       .replace(/\s*```$/, '')
@@ -181,9 +183,13 @@ export class IAService implements OnModuleInit {
     };
 
     const cleanRawText = (raw: string): string => {
-      return raw
-        .replace(/<think>[\s\S]*?<\/think>/gi, '')
-        .replace(/<think>[\s\S]*/gi, '')
+      let text = raw;
+      if (text.includes('</think>')) {
+        text = text.split('</think>').pop() || '';
+      } else if (text.includes('<think>')) {
+        text = text.replace(/<think>/gi, '');
+      }
+      return text
         .replace(/^```[a-z]*\s*/i, '')
         .replace(/\s*```$/, '')
         .trim();
@@ -206,7 +212,7 @@ export class IAService implements OnModuleInit {
       responseFormat = { type: 'json_object' as const };
     }
 
-    const maxTokens = isVision ? 2500 : 4000;
+    const maxTokens = 4000;
 
     const executeCall = async (params: any) => {
       const completion = await this.instance.groq.chat.completions.create(
